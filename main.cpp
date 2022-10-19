@@ -187,29 +187,26 @@ namespace rijndael {
 			void apply_key_schedule(const constant_table& tbl) noexcept
 			{
 				const std::span key_view {ekey};
-				for (auto r = 1u; r < nr + 1; ++r) {
-					for (auto j = 0u; j < nb; ++j) {
-						const auto c_idx = (r * nb) + j;
-						const column a {key_view.subspan((c_idx - 1) * 4, 4)};
-						const column b {key_view.subspan((c_idx - nk) * 4, 4)};
-						const column c {key_view.subspan(c_idx * 4, 4)};
-						std::memcpy(c.data(), a.data(), c.size_bytes());
-						if (c_idx % nk == 0) {
-							rot_word(c);
-							sub_word(tbl, c);
-							c[0] ^= tbl.rc[r];
-						}
-						else if constexpr (nk > 6) {
-							if (c_idx % 4 == 0)
-								sub_word(tbl, c);
-						}
-
-						std::uint32_t x, y;
-						std::memcpy(&x, c.data(), c.size_bytes());
-						std::memcpy(&y, b.data(), b.size_bytes());
-						x ^= y;
-						std::memcpy(c.data(), &x, c.size_bytes());
+				for (auto c_idx = nk; c_idx < (nr + 1) * nb; ++c_idx) {
+					const column a {key_view.subspan((c_idx - 1) * 4, 4)};
+					const column b {key_view.subspan((c_idx - nk) * 4, 4)};
+					const column c {key_view.subspan(c_idx * 4, 4)};
+					std::memcpy(c.data(), a.data(), c.size_bytes());
+					if (c_idx % nk == 0) {
+						rot_word(c);
+						sub_word(tbl, c);
+						c[0] ^= tbl.rc[c_idx / nk];
 					}
+					else if constexpr (nk > 6) {
+						if (c_idx % 4 == 0)
+							sub_word(tbl, c);
+					}
+
+					std::uint32_t x, y;
+					std::memcpy(&x, c.data(), c.size_bytes());
+					std::memcpy(&y, b.data(), b.size_bytes());
+					x ^= y;
+					std::memcpy(c.data(), &x, c.size_bytes());
 				}
 			}
 
