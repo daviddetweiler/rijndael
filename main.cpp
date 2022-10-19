@@ -247,10 +247,10 @@ namespace rijndael {
 
 				auto& [t0, t1, t2, t3] = inverted ? tbl.iround : tbl.round;
 				auto& sbox = inverted ? tbl.isbox : tbl.sbox;
-				const auto s = inverted ? -1 : 1;
-				const auto get = [s](block_view st, unsigned int r, unsigned int c) {
+				const auto get = [inverted](block_view st, unsigned int r, unsigned int c) {
 					const auto o = shifts[nb - 4][r];
-					const auto b = st[((c + s * o) % nb) * 4 + r];
+					const auto nc = (inverted ? c + (nb - o) : c + o) % nb;
+					const auto b = st[nc * 4 + r];
 					return b;
 				};
 
@@ -291,7 +291,7 @@ namespace rijndael {
 int main()
 {
 	const auto constants = rijndael::constant_table::make();
-	using cipher_type = rijndael::aes128;
+	using cipher_type = rijndael::rijndael<8, 6>;
 	std::array<std::uint8_t, cipher_type::key_size> key {};
 	std::array<std::uint8_t, cipher_type::block_size> block {};
 	const cipher_type cipher {*constants, key};
