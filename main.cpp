@@ -282,42 +282,53 @@ namespace rijndael {
 			}
 		};
 
+		template class rijndael<4, 4>;
+		template class rijndael<6, 4>;
+		template class rijndael<8, 4>;
+
 		using aes128 = rijndael<4, 4>;
 		using aes192 = rijndael<6, 4>;
 		using aes256 = rijndael<8, 4>;
+
+		template <typename cipher_type>
+		void benchmark(const constant_table& constants)
+		{
+			std::array<std::uint8_t, cipher_type::key_size> key {};
+			std::array<std::uint8_t, cipher_type::block_size> block {};
+			cipher_type cipher {constants, key};
+
+			constexpr auto reps = 1 << 16;
+			const auto start_k = __rdtsc();
+			for (auto i = 0u; i < reps; ++i)
+				cipher.rekey(constants, key);
+
+			const auto stop_k = __rdtsc();
+			const auto cycles_per_k = static_cast<float>(stop_k - start_k) / reps;
+
+			const auto start_e = __rdtsc();
+			for (auto i = 0u; i < reps; ++i)
+				cipher.encrypt(constants, block);
+
+			const auto stop_e = __rdtsc();
+			const auto cycles_per_e = static_cast<float>(stop_e - start_e) / reps;
+
+			const auto start_d = __rdtsc();
+			for (auto i = 0u; i < reps; ++i)
+				cipher.decrypt(constants, block);
+
+			const auto stop_d = __rdtsc();
+			const auto cycles_per_d = static_cast<float>(stop_d - start_d) / reps;
+
+			std::cout << cycles_per_k / cipher_type::key_size << ' ' << cycles_per_e / cipher_type::block_size << ' '
+					  << cycles_per_d / cipher_type::block_size << '\n';
+		}
 	}
 }
 
 int main()
 {
 	const auto constants = rijndael::constant_table::make();
-	using cipher_type = rijndael::aes256;
-	std::array<std::uint8_t, cipher_type::key_size> key {};
-	std::array<std::uint8_t, cipher_type::block_size> block {};
-	cipher_type cipher {*constants, key};
-
-	constexpr auto reps = 1 << 16;
-	const auto start_k = __rdtsc();
-	for (auto i = 0u; i < reps; ++i)
-		cipher.rekey(*constants, key);
-
-	const auto stop_k = __rdtsc();
-	const auto cycles_per_k = static_cast<float>(stop_k - start_k) / reps;
-
-	const auto start_e = __rdtsc();
-	for (auto i = 0u; i < reps; ++i)
-		cipher.encrypt(*constants, block);
-
-	const auto stop_e = __rdtsc();
-	const auto cycles_per_e = static_cast<float>(stop_e - start_e) / reps;
-
-	const auto start_d = __rdtsc();
-	for (auto i = 0u; i < reps; ++i)
-		cipher.decrypt(*constants, block);
-
-	const auto stop_d = __rdtsc();
-	const auto cycles_per_d = static_cast<float>(stop_d - start_d) / reps;
-
-	std::cout << cycles_per_k / cipher_type::key_size << ' ' << cycles_per_e / cipher_type::block_size << ' '
-			  << cycles_per_d / cipher_type::block_size << '\n';
+	rijndael::benchmark<rijndael::aes128>(*constants);
+	rijndael::benchmark<rijndael::aes192>(*constants);
+	rijndael::benchmark<rijndael::aes256>(*constants);
 }
