@@ -1,10 +1,13 @@
 #include <array>
 #include <cstdint>
 #include <cstring>
+#include <iostream>
 #include <memory>
 #include <span>
 #include <tuple>
 #include <utility>
+
+#include <intrin.h>
 
 #include <gsl/gsl>
 
@@ -214,20 +217,18 @@ namespace rijndael {
 			{
 				const std::span key_view {inverted ? iekey : ekey};
 				const auto offset = [inverted](unsigned int r) { return (inverted ? nr - r : r) * block_size; };
-				const auto rkey
-					= [&offset, key_view](unsigned int r) { return key_view.subspan(offset(r), block_size); };
+				const auto rkey = [&offset, key_view](unsigned int r) {
+					return rkey_view {key_view.subspan(offset(r), block_size)};
+				};
 
-				const rkey_view first_key {rkey(0)};
+				const auto first_key = rkey(0);
 				for (auto i = 0u; i < block_size; ++i)
 					state[i] ^= first_key[i];
 
-				for (auto i = 1u; i < nr; ++i) {
-					const rkey_view round_key {rkey(i)};
-					apply_round(tbl, inverted, false, state, round_key);
-				}
+				for (auto i = 1u; i < nr; ++i)
+					apply_round(tbl, inverted, false, state, rkey(i));
 
-				const rkey_view final_key {rkey(nr)};
-				apply_round(tbl, inverted, true, state, final_key);
+				apply_round(tbl, inverted, true, state, rkey(nr));
 			}
 
 			static void apply_round(
@@ -291,10 +292,25 @@ namespace rijndael {
 int main()
 {
 	const auto constants = rijndael::constant_table::make();
-	using cipher_type = rijndael::rijndael<8, 6>;
+	using cipher_type = rijndael::aes128;
 	std::array<std::uint8_t, cipher_type::key_size> key {};
 	std::array<std::uint8_t, cipher_type::block_size> block {};
 	const cipher_type cipher {*constants, key};
-	cipher.encrypt(*constants, block);
-	cipher.decrypt(*constants, block);
+
+	constexpr auto reps = 1 << 16;
+	const auto start_e = __rdtsc();
+	for (auto i = 0u; i < reps; ++i)
+		cipher.encrypt(*constants, block);
+
+	const auto stop_e = __rdtsc();
+	const auto cycles_per_e = static_cast<float>(stop_e - start_e) / reps;
+
+	const auto start_d = __rdtsc();
+	for (auto i = 0u; i < (1 << 16); ++i)
+		cipher.decrypt(*constants, block);
+
+	const auto stop_d = __rdtsc();
+	const auto cycles_per_d = static_cast<float>(stop_d - start_d) / reps;
+
+	std::cout << cycles_per_e / cipher_type::block_size << ' ' << cycles_per_d / cipher_type::block_size << '\n';
 }
