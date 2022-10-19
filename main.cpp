@@ -1,11 +1,12 @@
 #include <array>
 #include <cstdint>
 #include <cstring>
+#include <fstream>
 #include <iostream>
 #include <memory>
-#include <span>
 #include <tuple>
 #include <utility>
+#include <vector>
 
 #include <intrin.h>
 
@@ -43,7 +44,7 @@ namespace rijndael {
 		private:
 			friend std::unique_ptr<const constant_table> std::make_unique<const constant_table>();
 
-			constant_table() noexcept : rc {}, sbox {}, isbox {}, round {}, iround {}
+			constant_table() : rc {}, sbox {}, isbox {}, round {}, iround {}
 			{
 				auto mul_table = std::make_unique<b_op>();
 				auto inv_table = std::make_unique<u_op>();
@@ -120,6 +121,14 @@ namespace rijndael {
 			}
 		};
 
+		static constexpr std::array shifts {
+			std::array {0, 1, 2, 3},
+			std::array {0, 1, 2, 3},
+			std::array {0, 1, 2, 3},
+			std::array {0, 1, 2, 4},
+			std::array {0, 1, 3, 4},
+		};
+
 		template <unsigned int nk, unsigned int nb>
 		class rijndael {
 			static_assert(nk >= 4 && nb >= 4 && nk <= 8 && nb <= 8, "not a valid Rijndael cipher");
@@ -127,8 +136,8 @@ namespace rijndael {
 		public:
 			constexpr static auto key_size = nk * 4;
 			constexpr static auto block_size = nb * 4;
-			using key_view = std::span<const std::uint8_t, key_size>;
-			using block_view = std::span<std::uint8_t, block_size>;
+			using key_view = gsl::span<const std::uint8_t, key_size>;
+			using block_view = gsl::span<std::uint8_t, block_size>;
 
 			rijndael(const constant_table& c, key_view k) noexcept : rijndael {} { rekey(c, k); }
 
@@ -137,23 +146,23 @@ namespace rijndael {
 				std::memcpy(ekey.data(), k.data(), k.size_bytes());
 				apply_key_schedule(tbl);
 				std::memcpy(iekey.data(), ekey.data(), ekey.size());
-				const std::span view {iekey};
+				const gsl::span view {iekey};
 				for (auto r = 1u; r < nr; ++r) {
 					for (auto c = 0u; c < nb; ++c)
 						imix_column(tbl, column {view.subspan(((r * nb) + c) * 4, 4)});
 				}
 			}
 
-			void encrypt(const constant_table& tbl, block_view p) const noexcept { apply_rounds(tbl, false, p); }
-			void decrypt(const constant_table& tbl, block_view c) const noexcept { apply_rounds(tbl, true, c); }
+			void encrypt(const constant_table& tbl, block_view p) const noexcept { apply_rounds<false>(tbl, p); }
+			void decrypt(const constant_table& tbl, block_view c) const noexcept { apply_rounds<true>(tbl, c); }
 
 		private:
 			constexpr static auto nr = std::max(10u + nk - 4u, 10u + nb - 4u);
 			constexpr static auto round_keys_size = 4 * nb * (nr + 1);
 
-			using rkey_view = std::span<const std::uint8_t, block_size>;
+			using rkey_view = gsl::span<const std::uint8_t, block_size>;
 			using round_keys = std::array<std::uint8_t, round_keys_size>;
-			using column = std::span<std::uint8_t, 4>;
+			using column = gsl::span<std::uint8_t, 4>;
 
 			round_keys ekey {};
 			round_keys iekey {};
@@ -189,7 +198,7 @@ namespace rijndael {
 
 			void apply_key_schedule(const constant_table& tbl) noexcept
 			{
-				const std::span key_view {ekey};
+				const gsl::span key_view {ekey};
 				for (auto c_idx = nk; c_idx < (nr + 1) * nb; ++c_idx) {
 					const column a {key_view.subspan((c_idx - 1) * 4, 4)};
 					const column b {key_view.subspan((c_idx - nk) * 4, 4)};
@@ -213,10 +222,11 @@ namespace rijndael {
 				}
 			}
 
-			void apply_rounds(const constant_table& tbl, bool inverted, block_view state) const noexcept
+			template <bool inverted>
+			void apply_rounds(const constant_table& tbl, block_view state) const noexcept
 			{
-				const std::span key_view {inverted ? iekey : ekey};
-				const auto offset = [inverted](unsigned int r) { return (inverted ? nr - r : r) * block_size; };
+				const gsl::span key_view {inverted ? iekey : ekey};
+				const auto offset = [](unsigned int r) { return (inverted ? nr - r : r) * block_size; };
 				const auto rkey = [&offset, key_view](unsigned int r) {
 					return rkey_view {key_view.subspan(offset(r), block_size)};
 				};
@@ -226,30 +236,18 @@ namespace rijndael {
 					state[i] ^= first_key[i];
 
 				for (auto i = 1u; i < nr; ++i)
-					apply_round(tbl, inverted, false, state, rkey(i));
+					apply_round<inverted, false>(tbl, state, rkey(i));
 
-				apply_round(tbl, inverted, true, state, rkey(nr));
+				apply_round<inverted, true>(tbl, state, rkey(nr));
 			}
 
-			static void apply_round(
-				const constant_table& tbl,
-				bool inverted,
-				bool skip_mix,
-				block_view state,
-				rkey_view round_key) noexcept
+			template <bool inverted, bool skip_mix>
+			static void apply_round(const constant_table& tbl, block_view state, rkey_view round_key) noexcept
 			{
-				static constexpr std::array shifts {
-					std::array {0, 1, 2, 3},
-					std::array {0, 1, 2, 3},
-					std::array {0, 1, 2, 3},
-					std::array {0, 1, 2, 4},
-					std::array {0, 1, 3, 4},
-				};
-
-				auto& [t0, t1, t2, t3] = inverted ? tbl.iround : tbl.round;
+				static constexpr gsl::span row_shifts = shifts.at(nb - 4);
 				auto& sbox = inverted ? tbl.isbox : tbl.sbox;
-				const auto get = [inverted](block_view st, unsigned int r, unsigned int c) {
-					const auto o = shifts[nb - 4][r];
+				const auto get = [](block_view st, unsigned int r, unsigned int c) {
+					const auto o = row_shifts[r];
 					const auto nc = (inverted ? c + (nb - o) : c + o) % nb;
 					const auto b = st[nc * 4 + r];
 					return b;
@@ -259,7 +257,8 @@ namespace rijndael {
 				for (auto j = 0u; j < nb; ++j) {
 					std::uint32_t kc;
 					std::memcpy(&kc, &round_key[j * 4], 4);
-					if (!skip_mix) {
+					if constexpr (!skip_mix) {
+						auto& [t0, t1, t2, t3] = inverted ? tbl.iround : tbl.round;
 						const auto x = t0[get(state, 0, j)];
 						const auto y = t1[get(state, 1, j)];
 						const auto z = t2[get(state, 2, j)];
@@ -292,7 +291,7 @@ namespace rijndael {
 int main()
 {
 	const auto constants = rijndael::constant_table::make();
-	using cipher_type = rijndael::aes128;
+	using cipher_type = rijndael::aes256;
 	std::array<std::uint8_t, cipher_type::key_size> key {};
 	std::array<std::uint8_t, cipher_type::block_size> block {};
 	cipher_type cipher {*constants, key};
