@@ -214,16 +214,19 @@ namespace rijndael {
 			{
 				const std::span key_view {inverted ? iekey : ekey};
 				const auto offset = [inverted](unsigned int r) { return (inverted ? nr - r : r) * block_size; };
-				const rkey_view first_key {key_view.subspan(offset(0), block_size)};
+				const auto rkey
+					= [&offset, key_view](unsigned int r) { return key_view.subspan(offset(r), block_size); };
+
+				const rkey_view first_key {rkey(0)};
 				for (auto i = 0u; i < block_size; ++i)
 					state[i] ^= first_key[i];
 
 				for (auto i = 1u; i < nr; ++i) {
-					const rkey_view round_key {key_view.subspan(offset(i), block_size)};
+					const rkey_view round_key {rkey(i)};
 					apply_round(tbl, inverted, false, state, round_key);
 				}
 
-				const rkey_view final_key {key_view.subspan(offset(nr), block_size)};
+				const rkey_view final_key {rkey(nr)};
 				apply_round(tbl, inverted, true, state, final_key);
 			}
 
