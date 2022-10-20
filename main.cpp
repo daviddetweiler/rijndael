@@ -321,13 +321,23 @@ namespace rijndael {
 			const auto rkps = reps / rekey.count();
 			const auto embps = reps * block.size() / (encrypt.count() * 1024 * 1024);
 			const auto dmbps = reps * block.size() / (decrypt.count() * 1024 * 1024);
-			std::cout << std::format(
-				"{}-{}: {:.1f} K/s, {:.1f} MiB/s E, {:.1f} MiB/s D\n",
-				block.size() * 8,
-				key.size() * 8,
-				rkps,
-				embps,
-				dmbps);
+			if constexpr (block.size() == 16 && (key.size() == 16 || key.size() == 24 || key.size() == 32)) {
+				std::cout << std::format(
+					"AES-{}:\t\t{:.1f} K/s,\t{:.1f} MiB/s E,\t{:.1f} MiB/s D\n",
+					key.size() * 8,
+					rkps,
+					embps,
+					dmbps);
+			}
+			else {
+				std::cout << std::format(
+					"Rijndael-{}-{}:\t{:.1f} K/s,\t{:.1f} MiB/s E,\t{:.1f} MiB/s D\n",
+					block.size() * 8,
+					key.size() * 8,
+					rkps,
+					embps,
+					dmbps);
+			}
 		}
 
 		using blocks = std::make_integer_sequence<unsigned int, 5>;
