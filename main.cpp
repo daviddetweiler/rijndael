@@ -1,7 +1,8 @@
 #include <array>
+#include <chrono>
 #include <cstdint>
 #include <cstring>
-#include <fstream>
+#include <format>
 #include <iostream>
 #include <memory>
 #include <tuple>
@@ -282,10 +283,6 @@ namespace rijndael {
 			}
 		};
 
-		template class rijndael<4, 4>;
-		template class rijndael<6, 4>;
-		template class rijndael<8, 4>;
-
 		using aes128 = rijndael<4, 4>;
 		using aes192 = rijndael<6, 4>;
 		using aes256 = rijndael<8, 4>;
@@ -297,38 +294,74 @@ namespace rijndael {
 			std::array<std::uint8_t, cipher_type::block_size> block {};
 			cipher_type cipher {constants, key};
 
-			constexpr auto reps = 1 << 16;
-			const auto start_k = __rdtsc();
-			for (auto i = 0u; i < reps; ++i)
-				cipher.rekey(constants, key);
+			const auto time = [](auto&& task) {
+				using clock = std::chrono::high_resolution_clock;
+				const auto start = clock::now();
+				task();
+				const auto stop = clock::now();
+				return std::chrono::duration_cast<std::chrono::duration<double>>(stop - start);
+			};
 
-			const auto stop_k = __rdtsc();
-			const auto cycles_per_k = static_cast<float>(stop_k - start_k) / reps;
+			static constexpr auto reps = 1 << 20;
+			const auto rekey = time([&] {
+				for (auto i = 0u; i < reps; ++i)
+					cipher.rekey(constants, key);
+			});
 
-			const auto start_e = __rdtsc();
-			for (auto i = 0u; i < reps; ++i)
-				cipher.encrypt(constants, block);
+			const auto encrypt = time([&] {
+				for (auto i = 0u; i < reps; ++i)
+					cipher.encrypt(constants, block);
+			});
 
-			const auto stop_e = __rdtsc();
-			const auto cycles_per_e = static_cast<float>(stop_e - start_e) / reps;
+			const auto decrypt = time([&] {
+				for (auto i = 0u; i < reps; ++i)
+					cipher.decrypt(constants, block);
+			});
 
-			const auto start_d = __rdtsc();
-			for (auto i = 0u; i < reps; ++i)
-				cipher.decrypt(constants, block);
-
-			const auto stop_d = __rdtsc();
-			const auto cycles_per_d = static_cast<float>(stop_d - start_d) / reps;
-
-			std::cout << cycles_per_k / cipher_type::key_size << ' ' << cycles_per_e / cipher_type::block_size << ' '
-					  << cycles_per_d / cipher_type::block_size << '\n';
+			const auto rkps = reps / rekey.count();
+			const auto embps = reps * block.size() / (encrypt.count() * 1024 * 1024);
+			const auto dmbps = reps * block.size() / (decrypt.count() * 1024 * 1024);
+			std::cout << std::format(
+				"{}-{}: {:.1f} K/s, {:.1f} MiB/s E, {:.1f} MiB/s D\n",
+				block.size() * 8,
+				key.size() * 8,
+				rkps,
+				embps,
+				dmbps);
 		}
+
+		using blocks = std::make_integer_sequence<unsigned int, 5>;
+
+		template <unsigned int b, unsigned int k, unsigned int... s>
+		void iter_keys(const constant_table& table)
+		{
+			benchmark<rijndael<k + 4, b>>(table);
+			if constexpr (sizeof...(s))
+				iter_keys<b, s...>(table);
+		}
+
+		template <unsigned int b, typename type, type... s>
+		void all_keys(const constant_table& table, std::integer_sequence<type, s...>)
+		{
+			iter_keys<b + 4, s...>(table);
+		}
+
+		template <unsigned int b, unsigned int... s>
+		void iter_blocks(const constant_table& table)
+		{
+			all_keys<b>(table, blocks {});
+			if constexpr (sizeof...(s))
+				iter_blocks<s...>(table);
+		}
+
+		template <typename type, type... s>
+		void all_blocks(const constant_table& table, std::integer_sequence<type, s...>)
+		{
+			iter_blocks<s...>(table);
+		}
+
+		void run_benchmarks(const constant_table& table) { all_blocks(table, blocks {}); }
 	}
 }
 
-int main()
-{
-	const auto constants = rijndael::constant_table::make();
-	rijndael::benchmark<rijndael::aes128>(*constants);
-	rijndael::benchmark<rijndael::aes192>(*constants);
-	rijndael::benchmark<rijndael::aes256>(*constants);
-}
+int main() { rijndael::run_benchmarks(*rijndael::constant_table::make()); }
