@@ -34,7 +34,7 @@ namespace rijndael {
 
 		class constant_table {
 		public:
-			std::array<std::uint8_t, 15> rc;
+			std::array<std::uint8_t, (14 + 1) * 8 / 4> rc;
 			u_op sbox;
 			u_op isbox;
 			t_tables round;
@@ -157,8 +157,9 @@ namespace rijndael {
 			void encrypt(const constant_table& tbl, block_view p) const noexcept { apply_rounds<false>(tbl, p); }
 			void decrypt(const constant_table& tbl, block_view c) const noexcept { apply_rounds<true>(tbl, c); }
 
-		private:
 			constexpr static auto nr = std::max(10u + nk - 4u, 10u + nb - 4u);
+
+		private:
 			constexpr static auto round_keys_size = 4 * nb * (nr + 1);
 
 			using rkey_view = gsl::span<const std::uint8_t, block_size>;
@@ -211,7 +212,7 @@ namespace rijndael {
 						c[0] ^= tbl.rc[c_idx / nk];
 					}
 					else if constexpr (nk > 6) {
-						if (c_idx % 4 == 0)
+						if (c_idx % nk == 4)
 							sub_word(tbl, c);
 					}
 
@@ -287,12 +288,31 @@ namespace rijndael {
 		using aes192 = rijndael<6, 4>;
 		using aes256 = rijndael<8, 4>;
 
+		void print_blob(gsl::span<std::uint8_t> blob)
+		{
+			for (const auto& b : blob)
+				std::cout << std::format("{:02x}", b);
+
+			std::cout << '\n';
+		}
+
 		template <typename cipher_type>
 		void benchmark(const constant_table& constants)
 		{
 			std::array<std::uint8_t, cipher_type::key_size> key {};
 			std::array<std::uint8_t, cipher_type::block_size> block {};
 			cipher_type cipher {constants, key};
+
+			std::cout << "block size " << block.size() * 8 << " key size " << key.size() * 8 << ' ' << cipher.nr
+					  << '\n';
+
+			cipher.encrypt(constants, block);
+			print_blob(block);
+			cipher.encrypt(constants, block);
+			print_blob(block);
+			cipher.decrypt(constants, block);
+			cipher.decrypt(constants, block);
+			print_blob(block);
 
 			const auto time = [](auto&& task) {
 				using clock = std::chrono::high_resolution_clock;
@@ -321,56 +341,40 @@ namespace rijndael {
 			const auto rkps = reps / rekey.count();
 			const auto embps = reps * block.size() / (encrypt.count() * 1024 * 1024);
 			const auto dmbps = reps * block.size() / (decrypt.count() * 1024 * 1024);
-			if constexpr (block.size() == 16 && (key.size() == 16 || key.size() == 24 || key.size() == 32)) {
-				std::cout << std::format(
-					"AES-{}:\t\t{:.1f} K/s,\t{:.1f} MiB/s E,\t{:.1f} MiB/s D\n",
-					key.size() * 8,
-					rkps,
-					embps,
-					dmbps);
-			}
-			else {
-				std::cout << std::format(
-					"Rijndael-{}-{}:\t{:.1f} K/s,\t{:.1f} MiB/s E,\t{:.1f} MiB/s D\n",
-					block.size() * 8,
-					key.size() * 8,
-					rkps,
-					embps,
-					dmbps);
-			}
+			std::cout << std::format("{:.1f} K/s,\t{:.1f} MiB/s E,\t{:.1f} MiB/s D\n\n", rkps, embps, dmbps);
 		}
 
 		using blocks = std::make_integer_sequence<unsigned int, 5>;
 
-		template <unsigned int b, unsigned int k, unsigned int... s>
-		void iter_keys(const constant_table& table)
-		{
-			benchmark<rijndael<k + 4, b>>(table);
-			if constexpr (sizeof...(s))
-				iter_keys<b, s...>(table);
-		}
-
-		template <unsigned int b, typename type, type... s>
-		void all_keys(const constant_table& table, std::integer_sequence<type, s...>)
-		{
-			iter_keys<b + 4, s...>(table);
-		}
-
-		template <unsigned int b, unsigned int... s>
+		template <unsigned int k, unsigned int b, unsigned int... s>
 		void iter_blocks(const constant_table& table)
 		{
-			all_keys<b>(table, blocks {});
-			if constexpr (sizeof...(s))
-				iter_blocks<s...>(table);
+			benchmark<rijndael<k + 4, b + 4>>(table);
+			if constexpr (sizeof...(s) != 0)
+				iter_blocks<k, s...>(table);
+		}
+
+		template <unsigned int k, typename type, type... s>
+		void all_blocks(const constant_table& table, std::integer_sequence<type, s...>)
+		{
+			iter_blocks<k, s...>(table);
+		}
+
+		template <unsigned int k, unsigned int... s>
+		void iter_keys(const constant_table& table)
+		{
+			all_blocks<k>(table, blocks {});
+			if constexpr (sizeof...(s) != 0)
+				iter_keys<s...>(table);
 		}
 
 		template <typename type, type... s>
-		void all_blocks(const constant_table& table, std::integer_sequence<type, s...>)
+		void all_keys(const constant_table& table, std::integer_sequence<type, s...>)
 		{
-			iter_blocks<s...>(table);
+			iter_keys<s...>(table);
 		}
 
-		void run_benchmarks(const constant_table& table) { all_blocks(table, blocks {}); }
+		void run_benchmarks(const constant_table& table) { all_keys(table, blocks {}); }
 	}
 }
 
