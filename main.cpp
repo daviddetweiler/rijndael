@@ -138,8 +138,8 @@ namespace rijndael {
 		public:
 			constexpr static auto key_size = nk * 4;
 			constexpr static auto block_size = nb * 4;
-			using key_view = gsl::span<const std::uint8_t, key_size>;
-			using block_view = gsl::span<std::uint8_t, block_size>;
+			using key_view = std::span<const std::uint8_t, key_size>;
+			using block_view = std::span<std::uint8_t, block_size>;
 
 			rijndael(const constant_table& c, key_view k) noexcept : rijndael {} { rekey(c, k); }
 
@@ -148,7 +148,7 @@ namespace rijndael {
 				std::memcpy(ekey.data(), k.data(), k.size_bytes());
 				apply_key_schedule(tbl);
 				std::memcpy(iekey.data(), ekey.data(), ekey.size());
-				const gsl::span view {iekey};
+				const std::span view {iekey};
 				for (auto r = 1u; r < nr; ++r) {
 					for (auto c = 0u; c < nb; ++c)
 						imix_column(tbl, column {view.subspan(((r * nb) + c) * 4, 4)});
@@ -162,9 +162,9 @@ namespace rijndael {
 			constexpr static auto nr = std::max(10u + nk - 4u, 10u + nb - 4u);
 			constexpr static auto round_keys_size = 4 * nb * (nr + 1);
 
-			using rkey_view = gsl::span<const std::uint8_t, block_size>;
+			using rkey_view = std::span<const std::uint8_t, block_size>;
 			using round_keys = std::array<std::uint8_t, round_keys_size>;
-			using column = gsl::span<std::uint8_t, 4>;
+			using column = std::span<std::uint8_t, 4>;
 
 			round_keys ekey {};
 			round_keys iekey {};
@@ -200,7 +200,7 @@ namespace rijndael {
 
 			void apply_key_schedule(const constant_table& tbl) noexcept
 			{
-				const gsl::span key_view {ekey};
+				const std::span key_view {ekey};
 				for (auto c_idx = nk; c_idx < (nr + 1) * nb; ++c_idx) {
 					const column a {key_view.subspan((c_idx - 1) * 4, 4)};
 					const column b {key_view.subspan((c_idx - nk) * 4, 4)};
@@ -227,7 +227,7 @@ namespace rijndael {
 			template <bool inverted>
 			void apply_rounds(const constant_table& tbl, block_view state) const noexcept
 			{
-				const gsl::span key_view {inverted ? iekey : ekey};
+				const std::span key_view {inverted ? iekey : ekey};
 				const auto offset = [](unsigned int r) { return (inverted ? nr - r : r) * block_size; };
 				const auto rkey = [&offset, key_view](unsigned int r) {
 					return rkey_view {key_view.subspan(offset(r), block_size)};
@@ -246,7 +246,7 @@ namespace rijndael {
 			template <bool inverted, bool skip_mix>
 			static void apply_round(const constant_table& tbl, block_view state, rkey_view round_key) noexcept
 			{
-				static constexpr gsl::span row_shifts = shifts.at(nb - 4);
+				static constexpr std::span row_shifts = shifts.at(nb - 4);
 				auto& sbox = inverted ? tbl.isbox : tbl.sbox;
 				const auto get = [](block_view st, unsigned int r, unsigned int c) {
 					const auto o = row_shifts[r];
@@ -288,7 +288,7 @@ namespace rijndael {
 		using aes192 = rijndael<6, 4>;
 		using aes256 = rijndael<8, 4>;
 
-		void print_blob(gsl::span<std::uint8_t> blob)
+		void print_blob(std::span<std::uint8_t> blob)
 		{
 			for (const auto& b : blob)
 				std::cout << std::format("{:02X}", b);
@@ -347,7 +347,7 @@ namespace rijndael {
 				const auto embps = reps * block.size() / (encrypt.count() * 1024 * 1024);
 				const auto dmbps = reps * block.size() / (decrypt.count() * 1024 * 1024);
 				std::cout << std::format(
-					"b{}-k{}:\t{:.1f} K/s,\t{:.1f} MiB/s E,\t{:.1f} MiB/s D\n",
+					"b{}-k{}:\t{:.1f}\tK/s,\t{:.1f}\tMiB/s E,\t{:.1f}\tMiB/s D\n",
 					block.size() * 8,
 					key.size() * 8,
 					rkps,
@@ -392,7 +392,7 @@ namespace rijndael {
 
 int main(int argc, char** argv)
 {
-	const gsl::span arguments {argv, gsl::narrow_cast<std::size_t>(argc)};
+	const std::span arguments {argv, gsl::narrow_cast<std::size_t>(argc)};
 	if (argc != 2)
 		return 1;
 
