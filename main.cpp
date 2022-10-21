@@ -5,6 +5,7 @@
 #include <format>
 #include <iostream>
 #include <memory>
+#include <string_view>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -157,9 +158,8 @@ namespace rijndael {
 			void encrypt(const constant_table& tbl, block_view p) const noexcept { apply_rounds<false>(tbl, p); }
 			void decrypt(const constant_table& tbl, block_view c) const noexcept { apply_rounds<true>(tbl, c); }
 
-			constexpr static auto nr = std::max(10u + nk - 4u, 10u + nb - 4u);
-
 		private:
+			constexpr static auto nr = std::max(10u + nk - 4u, 10u + nb - 4u);
 			constexpr static auto round_keys_size = 4 * nb * (nr + 1);
 
 			using rkey_view = gsl::span<const std::uint8_t, block_size>;
@@ -291,89 +291,116 @@ namespace rijndael {
 		void print_blob(gsl::span<std::uint8_t> blob)
 		{
 			for (const auto& b : blob)
-				std::cout << std::format("{:02x}", b);
+				std::cout << std::format("{:02X}", b);
 
-			std::cout << std::endl;
+			std::cout << '\n';
 		}
 
+		enum class mode { vectors, times };
+
 		template <typename cipher_type>
-		void benchmark(const constant_table& constants)
+		void test(const constant_table& constants, mode m)
 		{
 			std::array<std::uint8_t, cipher_type::key_size> key {};
 			std::array<std::uint8_t, cipher_type::block_size> block {};
 			cipher_type cipher {constants, key};
+			if (m == mode::vectors) {
+				cipher.encrypt(constants, block);
+				print_blob(block);
+				cipher.encrypt(constants, block);
+				print_blob(block);
+				cipher.decrypt(constants, block);
+				cipher.decrypt(constants, block);
+				for (const auto& b : block) {
+					if (b)
+						std::cout << "bad decrypt\n";
+				}
 
-			std::cout << "block size " << block.size() * 8 << " key size " << key.size() * 8 << '\n';
-			cipher.encrypt(constants, block);
-			print_blob(block);
-			cipher.encrypt(constants, block);
-			print_blob(block);
-			cipher.decrypt(constants, block);
-			cipher.decrypt(constants, block);
-			print_blob(block);
+				std::cout << '\n';
+			}
+			else if (m == mode::times) {
+				const auto time = [](auto&& task) {
+					using clock = std::chrono::high_resolution_clock;
+					const auto start = clock::now();
+					task();
+					const auto stop = clock::now();
+					return std::chrono::duration_cast<std::chrono::duration<double>>(stop - start);
+				};
 
-			const auto time = [](auto&& task) {
-				using clock = std::chrono::high_resolution_clock;
-				const auto start = clock::now();
-				task();
-				const auto stop = clock::now();
-				return std::chrono::duration_cast<std::chrono::duration<double>>(stop - start);
-			};
+				static constexpr auto reps = 1 << 16;
+				const auto rekey = time([&] {
+					for (auto i = 0u; i < reps; ++i)
+						cipher.rekey(constants, key);
+				});
 
-			static constexpr auto reps = 1 << 16;
-			const auto rekey = time([&] {
-				for (auto i = 0u; i < reps; ++i)
-					cipher.rekey(constants, key);
-			});
+				const auto encrypt = time([&] {
+					for (auto i = 0u; i < reps; ++i)
+						cipher.encrypt(constants, block);
+				});
 
-			const auto encrypt = time([&] {
-				for (auto i = 0u; i < reps; ++i)
-					cipher.encrypt(constants, block);
-			});
+				const auto decrypt = time([&] {
+					for (auto i = 0u; i < reps; ++i)
+						cipher.decrypt(constants, block);
+				});
 
-			const auto decrypt = time([&] {
-				for (auto i = 0u; i < reps; ++i)
-					cipher.decrypt(constants, block);
-			});
-
-			const auto rkps = reps / rekey.count();
-			const auto embps = reps * block.size() / (encrypt.count() * 1024 * 1024);
-			const auto dmbps = reps * block.size() / (decrypt.count() * 1024 * 1024);
-			std::cout << std::format("{:.1f} K/s,\t{:.1f} MiB/s E,\t{:.1f} MiB/s D\n", rkps, embps, dmbps) << std::endl;
+				const auto rkps = reps / rekey.count();
+				const auto embps = reps * block.size() / (encrypt.count() * 1024 * 1024);
+				const auto dmbps = reps * block.size() / (decrypt.count() * 1024 * 1024);
+				std::cout << std::format(
+					"b{}-k{}:\t{:.1f} K/s,\t{:.1f} MiB/s E,\t{:.1f} MiB/s D\n",
+					block.size() * 8,
+					key.size() * 8,
+					rkps,
+					embps,
+					dmbps);
+			}
 		}
 
 		using blocks = std::make_integer_sequence<unsigned int, 5>;
 
 		template <unsigned int k, unsigned int b, unsigned int... s>
-		void iter_blocks(const constant_table& table)
+		void iter_blocks(const constant_table& table, mode m)
 		{
-			benchmark<rijndael<k + 4, b + 4>>(table);
+			test<rijndael<k + 4, b + 4>>(table, m);
 			if constexpr (sizeof...(s) != 0)
-				iter_blocks<k, s...>(table);
+				iter_blocks<k, s...>(table, m);
 		}
 
 		template <unsigned int k, typename type, type... s>
-		void all_blocks(const constant_table& table, std::integer_sequence<type, s...>)
+		void all_blocks(const constant_table& table, mode m, std::integer_sequence<type, s...>)
 		{
-			iter_blocks<k, s...>(table);
+			iter_blocks<k, s...>(table, m);
 		}
 
 		template <unsigned int k, unsigned int... s>
-		void iter_keys(const constant_table& table)
+		void iter_keys(const constant_table& table, mode m)
 		{
-			all_blocks<k>(table, blocks {});
+			all_blocks<k>(table, m, blocks {});
 			if constexpr (sizeof...(s) != 0)
-				iter_keys<s...>(table);
+				iter_keys<s...>(table, m);
 		}
 
 		template <typename type, type... s>
-		void all_keys(const constant_table& table, std::integer_sequence<type, s...>)
+		void all_keys(const constant_table& table, mode m, std::integer_sequence<type, s...>)
 		{
-			iter_keys<s...>(table);
+			iter_keys<s...>(table, m);
 		}
 
-		void run_benchmarks(const constant_table& table) { all_keys(table, blocks {}); }
+		void run_benchmarks(const constant_table& table, mode m) { all_keys(table, m, blocks {}); }
 	}
 }
 
-int main() { rijndael::run_benchmarks(*rijndael::constant_table::make()); }
+int main(int argc, char** argv)
+{
+	const gsl::span arguments {argv, gsl::narrow_cast<std::size_t>(argc)};
+	if (argc != 2)
+		return 1;
+
+	const std::string_view mode {arguments[1]};
+	if (mode == "vectors")
+		rijndael::run_benchmarks(*rijndael::constant_table::make(), rijndael::mode::vectors);
+	else if (mode == "times")
+		rijndael::run_benchmarks(*rijndael::constant_table::make(), rijndael::mode::times);
+	else
+		return 1;
+}
