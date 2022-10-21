@@ -293,7 +293,7 @@ namespace rijndael {
 			for (const auto& b : blob)
 				std::cout << std::format("{:02x}", b);
 
-			std::cout << '\n';
+			std::cout << std::endl;
 		}
 
 		template <typename cipher_type>
@@ -303,9 +303,7 @@ namespace rijndael {
 			std::array<std::uint8_t, cipher_type::block_size> block {};
 			cipher_type cipher {constants, key};
 
-			std::cout << "block size " << block.size() * 8 << " key size " << key.size() * 8 << ' ' << cipher.nr
-					  << '\n';
-
+			std::cout << "block size " << block.size() * 8 << " key size " << key.size() * 8 << '\n';
 			cipher.encrypt(constants, block);
 			print_blob(block);
 			cipher.encrypt(constants, block);
@@ -322,7 +320,7 @@ namespace rijndael {
 				return std::chrono::duration_cast<std::chrono::duration<double>>(stop - start);
 			};
 
-			static constexpr auto reps = 1 << 20;
+			static constexpr auto reps = 1 << 16;
 			const auto rekey = time([&] {
 				for (auto i = 0u; i < reps; ++i)
 					cipher.rekey(constants, key);
@@ -341,7 +339,7 @@ namespace rijndael {
 			const auto rkps = reps / rekey.count();
 			const auto embps = reps * block.size() / (encrypt.count() * 1024 * 1024);
 			const auto dmbps = reps * block.size() / (decrypt.count() * 1024 * 1024);
-			std::cout << std::format("{:.1f} K/s,\t{:.1f} MiB/s E,\t{:.1f} MiB/s D\n\n", rkps, embps, dmbps);
+			std::cout << std::format("{:.1f} K/s,\t{:.1f} MiB/s E,\t{:.1f} MiB/s D\n", rkps, embps, dmbps) << std::endl;
 		}
 
 		using blocks = std::make_integer_sequence<unsigned int, 5>;
