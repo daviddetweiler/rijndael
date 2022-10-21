@@ -387,6 +387,13 @@ namespace rijndael {
 		}
 
 		void run_benchmarks(const constant_table& table, mode m) { all_keys(table, m, blocks {}); }
+
+		void benchmark_aes(const constant_table& table)
+		{
+			test<aes128>(table, mode::times);
+			test<aes192>(table, mode::times);
+			test<aes256>(table, mode::times);
+		}
 	}
 }
 
@@ -401,6 +408,8 @@ int main(int argc, char** argv)
 		rijndael::run_benchmarks(*rijndael::constant_table::make(), rijndael::mode::vectors);
 	else if (mode == "times")
 		rijndael::run_benchmarks(*rijndael::constant_table::make(), rijndael::mode::times);
+	else if (mode == "aes")
+		rijndael::benchmark_aes(*rijndael::constant_table::make());
 	else
 		return 1;
 }
