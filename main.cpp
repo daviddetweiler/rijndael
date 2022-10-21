@@ -234,8 +234,13 @@ namespace rijndael {
 				};
 
 				const auto first_key = rkey(0);
-				for (auto i = 0u; i < block_size; ++i)
-					state[i] ^= first_key[i];
+				for (auto i = 0u; i < nb; ++i) {
+					std::uint32_t a, b;
+					std::memcpy(&a, &state[i * 4], 4);
+					std::memcpy(&b, &first_key[i * 4], 4);
+					a ^= b;
+					std::memcpy(&state[i * 4], &a, 4);
+				}
 
 				for (auto i = 1u; i < nr; ++i)
 					apply_round<inverted, false>(tbl, state, rkey(i));
@@ -327,7 +332,7 @@ namespace rijndael {
 					return std::chrono::duration_cast<std::chrono::duration<double>>(stop - start);
 				};
 
-				static constexpr auto reps = 1 << 16;
+				static constexpr auto reps = 1 << 18;
 				const auto rekey = time([&] {
 					for (auto i = 0u; i < reps; ++i)
 						cipher.rekey(constants, key);
