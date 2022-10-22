@@ -69,12 +69,11 @@ namespace rijndael {
 				for (auto i = 2u; i < rc.size(); ++i)
 					rc[i] = mul[rc[i - 1]][0x02];
 
-				const auto rotate = [](std::uint8_t b, unsigned int i) { return (b << i) | (b >> (7 & (0u - i))); };
 				for (auto i = 0u; i < 256u; ++i) {
 					const auto b = gsl::narrow_cast<std::uint8_t>(i);
 					const auto ib = inv[b];
 					const auto sb = gsl::narrow_cast<std::uint8_t>(
-						rotate(ib, 4) ^ rotate(ib, 3) ^ rotate(ib, 2) ^ rotate(ib, 1) ^ ib ^ 0x63u);
+						rotate<4>(ib) ^ rotate<3>(ib) ^ rotate<2>(ib) ^ rotate<1>(ib) ^ ib ^ 0x63u);
 
 					sbox[b] = sb;
 					isbox[sb] = b;
@@ -100,24 +99,23 @@ namespace rijndael {
 				inv_table.reset();
 			}
 
-			static constexpr std::uint8_t rotate(std::uint8_t b, unsigned int i)
+			template <unsigned int i>
+			static constexpr std::uint8_t rotate(std::uint8_t b)
 			{
 				return (b << i) | (b >> (7 & (0u - i)));
 			}
 
 			static constexpr std::uint8_t xtimes(std::uint8_t n)
 			{
-				const auto t = static_cast<std::uint16_t>(n) << 1;
-				return gsl::narrow_cast<std::uint8_t>((n & (1u << 7)) ? t ^ 0x11b : t);
+				const auto t = gsl::narrow_cast<std::uint8_t>(n << 1);
+				return (n & 0x80) ? t ^ 0x1b : t;
 			}
 
 			static constexpr std::uint8_t times(std::uint8_t a, std::uint8_t b)
 			{
 				std::uint8_t c {};
-				for (auto i = 0u; i < 8u; ++i) {
-					c ^= (a & (1u << i)) ? b : 0x0u;
-					b = xtimes(b);
-				}
+				for (; a; a >>= 1, b = xtimes(b))
+					c ^= (a & 0x01) ? b : 0x0u;
 
 				return c;
 			}
@@ -181,21 +179,15 @@ namespace rijndael {
 				std::memcpy(c.data(), &nc, 4);
 			}
 
-			static constexpr void rot_word(column c)
-			{
-				const auto t = c[0];
-				c[0] = c[1];
-				c[1] = c[2];
-				c[2] = c[3];
-				c[3] = t;
-			}
+			static constexpr auto rot_word(std::uint32_t c) { return c >> 8 | c << 24; }
 
-			static constexpr void sub_word(const constant_table& tbl, column c)
+			static constexpr auto sub_word(const constant_table& tbl, std::uint32_t c)
 			{
-				c[0] = tbl.sbox[c[0]];
-				c[1] = tbl.sbox[c[1]];
-				c[2] = tbl.sbox[c[2]];
-				c[3] = tbl.sbox[c[3]];
+				const auto x = tbl.sbox[c & 0xff];
+				const auto y = tbl.sbox[(c >> 8) & 0xff];
+				const auto z = tbl.sbox[(c >> 16) & 0xff];
+				const auto w = tbl.sbox[(c >> 24) & 0xff];
+				return pack(x, y, z, w);
 			}
 
 			void apply_key_schedule(const constant_table& tbl) noexcept
@@ -205,20 +197,18 @@ namespace rijndael {
 					const column a {key_view.subspan((c_idx - 1) * 4, 4)};
 					const column b {key_view.subspan((c_idx - nk) * 4, 4)};
 					const column c {key_view.subspan(c_idx * 4, 4)};
-					std::memcpy(c.data(), a.data(), c.size_bytes());
+
+					std::uint32_t x, y;
+					std::memcpy(&x, a.data(), 4);
+					std::memcpy(&y, b.data(), 4);
 					if (c_idx % nk == 0) {
-						rot_word(c);
-						sub_word(tbl, c);
-						c[0] ^= tbl.rc[c_idx / nk];
+						x = sub_word(tbl, rot_word(x)) ^ tbl.rc[c_idx / nk];
 					}
 					else if constexpr (nk > 6) {
 						if (c_idx % nk == 4)
-							sub_word(tbl, c);
+							x = sub_word(tbl, x);
 					}
 
-					std::uint32_t x, y;
-					std::memcpy(&x, c.data(), c.size_bytes());
-					std::memcpy(&y, b.data(), b.size_bytes());
 					x ^= y;
 					std::memcpy(c.data(), &x, c.size_bytes());
 				}
@@ -244,9 +234,9 @@ namespace rijndael {
 
 				std::array<std::uint8_t, block_size> nstate {};
 				for (auto i = 1u; i < nr; ++i)
-					apply_round<inverted, false>(tbl, i % 2 ? state : nstate, rkey(i), i % 2 ? nstate : state);
+					apply_round<inverted, false>(tbl, (i % 2) ? state : nstate, rkey(i), (i % 2) ? nstate : state);
 
-				apply_round<inverted, true>(tbl, nr % 2 ? state : nstate, rkey(nr), nr % 2 ? nstate : state);
+				apply_round<inverted, true>(tbl, (nr % 2) ? state : nstate, rkey(nr), (nr % 2) ? nstate : state);
 				if constexpr (nr % 2)
 					std::memcpy(state.data(), nstate.data(), block_size);
 			}
@@ -255,7 +245,7 @@ namespace rijndael {
 			static void
 			apply_round(const constant_table& tbl, block_view state, rkey_view round_key, block_view nstate) noexcept
 			{
-				static constexpr std::span row_shifts = shifts.at(nb - 4);
+				static constexpr std::span row_shifts = shifts[nb - 4];
 				auto& sbox = inverted ? tbl.isbox : tbl.sbox;
 				const auto get = [](block_view st, unsigned int r, unsigned int c) {
 					const auto o = row_shifts[r];
