@@ -143,6 +143,7 @@ namespace rijndael {
 			constexpr static auto key_size = nk * 4;
 			constexpr static auto block_size = nb * 4;
 			constexpr static auto nr = std::max(10u + nk - 4u, 10u + nb - 4u);
+			constexpr static auto nek = (nr + 1) * nb;
 			using key_view = std::span<const std::uint8_t, key_size>;
 			using block_view = std::span<std::uint8_t, block_size>;
 
@@ -167,10 +168,8 @@ namespace rijndael {
 			void decrypt(const constant_table& tbl, block_view c) const noexcept { apply_rounds<true>(tbl, c); }
 
 		private:
-			constexpr static auto round_keys_size = 4 * nb * (nr + 1);
-
 			using rkey_view = std::span<const std::uint8_t, block_size>;
-			using round_keys = std::array<std::uint8_t, round_keys_size>;
+			using round_keys = std::array<std::uint8_t, nek * 4>;
 			using column = std::span<std::uint8_t, 4>;
 
 			round_keys ekey {};
@@ -205,7 +204,7 @@ namespace rijndael {
 				const constant_table& tbl) noexcept
 			{
 				const std::span key_view {ekey};
-				for (auto c_idx = nk; c_idx < (nr + 1) * nb; ++c_idx) {
+				for (auto c_idx = nk; c_idx < nek; ++c_idx) {
 					const column a {key_view.subspan((c_idx - 1) * 4ull, 4)};
 					const column b {key_view.subspan((c_idx - nk) * 4ull, 4)};
 					const column c {key_view.subspan(c_idx * 4ull, 4)};
@@ -370,12 +369,13 @@ namespace rijndael {
 				const auto embps = reps * block.size() / (encrypt.count() * 1024 * 1024);
 				const auto dmbps = reps * block.size() / (decrypt.count() * 1024 * 1024);
 				static constexpr auto div = reps * cipher.block_size * cipher.nr;
+				static constexpr auto div_k = reps * 4 * cipher.nek;
 				std::cout << std::format(
 					"b{}-k{}: {:.1f} K/s ({:.1f}), {:.1f} MiB/s E ({:01.02f}), {:.1f} MiB/s D ({:01.02f})\n",
 					block.size() * 8,
 					key.size() * 8,
 					rkps,
-					rk_c / reps,
+					rk_c / div_k,
 					embps,
 					e_c / div,
 					dmbps,
