@@ -337,7 +337,7 @@ namespace rijndael {
 						stop_c - start_c);
 				};
 
-				static constexpr auto reps = 1 << 20;
+				static constexpr auto reps = 1 << 24;
 				const auto [rekey, rk_c] = time([&] {
 					for (auto i = 0u; i < reps; ++i)
 						cipher.rekey(constants, key);
@@ -404,8 +404,11 @@ namespace rijndael {
 		void benchmark_aes(const constant_table& table)
 		{
 			test<aes128>(table, mode::times);
+			test<aes128>(table, mode::vectors);
 			test<aes192>(table, mode::times);
+			test<aes192>(table, mode::vectors);
 			test<aes256>(table, mode::times);
+			test<aes256>(table, mode::vectors);
 		}
 	}
 }
