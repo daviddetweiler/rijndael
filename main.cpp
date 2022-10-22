@@ -242,14 +242,18 @@ namespace rijndael {
 					std::memcpy(&state[i * 4], &a, 4);
 				}
 
+				std::array<std::uint8_t, block_size> nstate {};
 				for (auto i = 1u; i < nr; ++i)
-					apply_round<inverted, false>(tbl, state, rkey(i));
+					apply_round<inverted, false>(tbl, i % 2 ? state : nstate, rkey(i), i % 2 ? nstate : state);
 
-				apply_round<inverted, true>(tbl, state, rkey(nr));
+				apply_round<inverted, true>(tbl, nr % 2 ? state : nstate, rkey(nr), nr % 2 ? nstate : state);
+				if constexpr (nr % 2)
+					std::memcpy(state.data(), nstate.data(), block_size);
 			}
 
 			template <bool inverted, bool skip_mix>
-			static void apply_round(const constant_table& tbl, block_view state, rkey_view round_key) noexcept
+			static void
+			apply_round(const constant_table& tbl, block_view state, rkey_view round_key, block_view nstate) noexcept
 			{
 				static constexpr std::span row_shifts = shifts.at(nb - 4);
 				auto& sbox = inverted ? tbl.isbox : tbl.sbox;
@@ -260,7 +264,6 @@ namespace rijndael {
 					return b;
 				};
 
-				std::array<std::uint8_t, block_size> nstate {};
 				for (auto j = 0u; j < nb; ++j) {
 					std::uint32_t kc;
 					std::memcpy(&kc, &round_key[j * 4], 4);
@@ -284,8 +287,6 @@ namespace rijndael {
 						std::memcpy(&nstate[j * 4], &nc, 4);
 					}
 				}
-
-				std::memcpy(state.data(), nstate.data(), nstate.size());
 			}
 		};
 
@@ -327,23 +328,27 @@ namespace rijndael {
 				const auto time = [](auto&& task) {
 					using clock = std::chrono::high_resolution_clock;
 					const auto start = clock::now();
+					const auto start_c = __rdtsc();
 					task();
+					const auto stop_c = __rdtsc();
 					const auto stop = clock::now();
-					return std::chrono::duration_cast<std::chrono::duration<double>>(stop - start);
+					return std::make_tuple(
+						std::chrono::duration_cast<std::chrono::duration<double>>(stop - start),
+						stop_c - start_c);
 				};
 
-				static constexpr auto reps = 1 << 18;
-				const auto rekey = time([&] {
+				static constexpr auto reps = 1 << 20;
+				const auto [rekey, rk_c] = time([&] {
 					for (auto i = 0u; i < reps; ++i)
 						cipher.rekey(constants, key);
 				});
 
-				const auto encrypt = time([&] {
+				const auto [encrypt, e_c] = time([&] {
 					for (auto i = 0u; i < reps; ++i)
 						cipher.encrypt(constants, block);
 				});
 
-				const auto decrypt = time([&] {
+				const auto [decrypt, d_c] = time([&] {
 					for (auto i = 0u; i < reps; ++i)
 						cipher.decrypt(constants, block);
 				});
@@ -352,12 +357,15 @@ namespace rijndael {
 				const auto embps = reps * block.size() / (encrypt.count() * 1024 * 1024);
 				const auto dmbps = reps * block.size() / (decrypt.count() * 1024 * 1024);
 				std::cout << std::format(
-					"b{}-k{}:\t{:.1f}\tK/s,\t{:.1f}\tMiB/s E,\t{:.1f}\tMiB/s D\n",
+					"b{}-k{}:\t{:.1f}\tK/s ({}),\t{:.1f}\tMiB/s E ({}),\t{:.1f}\tMiB/s D ({})\n",
 					block.size() * 8,
 					key.size() * 8,
 					rkps,
+					rk_c / reps,
 					embps,
-					dmbps);
+					e_c / reps,
+					dmbps,
+					d_c / reps);
 			}
 		}
 
