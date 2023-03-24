@@ -376,10 +376,10 @@ namespace rijndael {
 				const auto rkps = reps / apply_key.count();
 				const auto embps = reps * block.size() / (encrypt.count() * 1024 * 1024);
 				const auto dmbps = reps * block.size() / (decrypt.count() * 1024 * 1024);
-				static constexpr auto div = reps * cipher.block_size * cipher.n_rounds;
-				static constexpr auto div_k = reps * 4 * cipher.n_key_words;
+				static constexpr auto div = reps * cipher.block_size;
+				static constexpr auto div_k = reps * cipher.key_size;
 				std::cout << std::format(
-					"b{}-k{}: {:.1f} K/s ({:.1f}), {:.1f} MiB/s E ({:01.02f}), {:.1f} MiB/s D ({:01.02f})\n",
+					"b{}-k{}: {:.1f} K/s ({:01.02f}), {:.1f} MiB/s E ({:01.02f}), {:.1f} MiB/s D ({:01.02f})\n",
 					block.size() * 8,
 					key.size() * 8,
 					rkps,
